@@ -586,4 +586,3 @@ function keyReleased() {
     play4Tick = 0;
   }
 }
-

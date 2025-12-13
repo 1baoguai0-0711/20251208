@@ -48,6 +48,7 @@ let orangeText = "需要我解答嗎?";
 let isInteracting = false;
 let isFallingDown = false; // 橘子角色是否正在倒下
 let fallDownTick = 0;    // 倒下動畫的計數器
+let interactionCooldown = 0; // 互動冷卻計數器
 const fallDownDelay = 8; // 倒下動畫的速度
 
 // 跳躍相關
@@ -193,7 +194,7 @@ function setup() {
   posX2 = width / 2 + 60;
   baseY = height / 2;
   posY = baseY;
-  posX7_fixed = width / 4; // 設定第 7 個角色的固定位置
+  posX7_fixed = width / 2 - 200; // 將角色2（橘子）位置移到靠近中央的左側
 
   // 若圖片已載入，計算每幀寬高；若尚未載入，會在 draw 中延遲計算
   if (spriteImg && spriteImg.width) {
@@ -241,6 +242,9 @@ function setup() {
 
 function draw() {
   background('#a2d2ff');
+  // 每幀更新互動冷卻
+  if (interactionCooldown > 0) interactionCooldown--;
+
   // 更新移動狀態（支援按住鍵）
   movingLeft = keyIsDown(LEFT_ARROW);
   movingRight = keyIsDown(RIGHT_ARROW);
@@ -325,7 +329,7 @@ function draw() {
   // 處理空白鍵動作（4all），改為「按住空白鍵時持續顯示並播放 4all；放開時恢復 1all」
   // 判斷是否按住空白鍵：按住時顯示並播放 4all，放開時恢復為其他狀態
   const downArrowDown = keyIsDown(DOWN_ARROW);
-  if (downArrowDown && !isInteracting) { // 改為按下鍵觸發，且不在對話時
+  if (downArrowDown) { // 移除 !isInteracting，讓衝撞優先於對話
     isPlaying4 = true;
     // 切換為 4all 的圖與幀設定
     if (sprite4Img) {
@@ -400,23 +404,32 @@ function draw() {
   // --- 繪製固定不動的橘子角色 (第 7 個角色)，並加入互動邏輯 ---
   const distance = abs(posX1 - posX7_fixed);
 
+  // 完整的碰撞偵測，包含 X 和 Y 軸
+  const playerHalfW = isPlaying4 ? (displayW * 0.9) / 2 : displayW / 2; // 衝撞時使用90%寬度的hitbox，更精確
+  const playerHalfH = displayH / 2; // 高度不變
+  const targetHalfW = (frameW7 * displayScale) / 2;
+  const targetHalfH = (frameH7 * displayScale) / 2;
+
+  // 判斷是否重疊
+  const isOverlapping = (abs(posX1 - posX7_fixed) < (playerHalfW + targetHalfW)) && 
+                        (abs(drawY - baseY) < (playerHalfH + targetHalfH));
+  
   // 碰撞偵測：如果正在衝撞 (isPlaying4) 且尚未倒下 (isFallingDown)
-  if (isPlaying4 && !isFallingDown && distance < (displayW / 2 + (frameW7 * displayScale) / 2)) {
+  if (isPlaying4 && !isFallingDown && isOverlapping) {
     isFallingDown = true; // 觸發倒下
     fallDownTick = 0;     // 重置倒下動畫計數器
-    isPlaying4 = false;   // 結束衝撞狀態 (讓衝撞角色消失)
+    isInteracting = false; // 確保衝撞後可以穿過，而不是觸發對話
   }
 
-  // 繪製邏輯：優先處理互動和倒下狀態
   if (distance < interactionDistance) {
-    // --- 靠近時：顯示提問動畫 (5q) ---
     // 如果角色之前是倒下的，現在靠近時將其恢復
-    if (isFallingDown) {
+    if (isFallingDown && !isPlaying4) { // 只有在非衝撞狀態靠近時才恢復
       isFallingDown = false;
       fallDownTick = 0;
-    }
-    isInteracting = true;
-
+      // 恢復後，暫時不進入互動狀態，避免立即顯示對話框
+      isInteracting = false;
+      interactionCooldown = 30; // 設定30幀（約0.5秒）的冷卻時間
+    } else if (!isFallingDown && interactionCooldown === 0) { // 只有在非倒下且冷卻結束時才互動
     // 顯示並定位輸入框在角色1上方
     inputBox.show();
     inputBox.position(posX1 - inputBox.width / 2, drawY - displayH - 20);
@@ -454,50 +467,46 @@ function draw() {
     translate(posX7_fixed, baseY);
     image(sprite5qImg, 0, 0, displayW5q, displayH5q, sx5q, sy5q, frameW5q, frameH5q);
     pop();
-  } else {
-    // --- 遠離時 ---
+    isInteracting = true;
+    }
+  } else { // 遠離時，或角色正在倒下時
     // 如果只是剛從互動狀態離開，重置對話UI
-    if (isInteracting) { // 如果只是剛從互動狀態離開，重置對話UI
+    if (isInteracting) {
       isInteracting = false;
       inputBox.hide();
       orangeText = "需要我解答嗎?"; // 重設文字
     }
+  }
 
-    // 如果是倒下狀態，就繼續畫倒下的樣子；否則畫正常的樣子
-    if (isFallingDown) {
-      drawFallingDownAnimation();
-    } else if (sprite7Img && sprite7Img.width) {
-      // 顯示原本的橘子動畫 (7)
+  // --- 統一繪製橘子角色 ---
+  // 根據狀態（倒下、互動、正常）決定繪製哪個動畫
+  // 註：互動動畫 (5q) 已在上面 if 區塊中繪製，此處不再重複
+  if (isFallingDown) {
+    // 狀態1：倒下
+    drawFallingDownAnimation();
+  } else if (!isInteracting && sprite7Img && sprite7Img.width) {
+    // 狀態2：正常站立 (遠離時)
     if (frameW7 === 0) { // 延遲計算
       frameW7 = floor(sprite7Img.width / TOTAL_FRAMES_7);
       frameH7 = sprite7Img.height;
     }
     const idx7 = floor(frameCount / frameDelay) % TOTAL_FRAMES_7;
     const sx7 = idx7 * frameW7;
-    const sy7 = 0;
     const displayW7 = frameW7 * displayScale;
     const displayH7 = frameH7 * displayScale;
 
     push();
     translate(posX7_fixed, baseY);
-    image(sprite7Img, 0, 0, displayW7, displayH7, sx7, sy7, frameW7, frameH7);
+    image(sprite7Img, 0, 0, displayW7, displayH7, sx7, 0, frameW7, frameH7);
     pop();
-    } else {
-      // 備用：如果橘子圖片也沒載入，可以顯示一個提示
-      push();
-      fill(0);
-      textAlign(CENTER);
-      text('等待橘子角色載入...', posX7_fixed, baseY);
-      pop();
-    }
+  } else if (!isInteracting && !sprite7Img) {
+    // 備用：如果橘子圖片也沒載入，可以顯示一個提示
+    push();
+    fill(0);
+    textAlign(CENTER);
+    text('等待橘子角色載入...', posX7_fixed, baseY);
+    pop();
   }
-
-
-  // 同時繪製另一張（1all 或 2all），位於 posX2，使用自己的幀索引
-  // 已改為：當按鍵時 currentImg = sprite2 並在主位置 posX1 繪製，
-  // 所以移除額外以 posX2 再繪製的區塊（避免重疊）
-
-  // 已移除 5all 的產生與繪製，空白鍵只會播放並移動 4all（不會生成任何新角色）
 
   // 最後繪製主要角色，確保它在最上層
   push();
@@ -549,8 +558,8 @@ function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
   // 更新位置（保持於中間附近）
   posY = height / 2;
-  // 重新置中兩個角色
-  posX7_fixed = width / 4; // 視窗變動時也更新固定位置
+  // 視窗變動時也更新固定位置，與 setup() 中保持一致
+  posX7_fixed = width / 2 - 200;
   posX1 = width / 2 - 60;
   posX2 = width / 2 + 60;
 }
@@ -577,3 +586,4 @@ function keyReleased() {
     play4Tick = 0;
   }
 }
+

@@ -42,9 +42,13 @@ let facing2 = 1; // 2all 的朝向（獨立於主角）
 let lastFacing = 1; // 紀錄最近一次移動方向，用於靜止時的朝向
 let displayScale = 3; // 放大倍數，可調
 const interactionDistance = 100; // 角色互動的觸發距離
-// 互動文字相關
+
+// --- 互動與問答遊戲相關 ---
+let quizTable; // 儲存從 CSV 載入的題庫
+let currentQuestion = null; // 當前抽到的題目物件
+let quizState = 'idle'; // 遊戲狀態: 'idle', 'asking', 'feedback'
 let inputBox;
-let orangeText = "需要我解答嗎?";
+let orangeText = "要來點挑戰嗎?"; // 角色2的對話文字
 let isInteracting = false;
 let isFallingDown = false; // 橘子角色是否正在倒下
 let fallDownTick = 0;    // 倒下動畫的計數器
@@ -181,6 +185,16 @@ function preload() {
     },
     err => {
       console.error('載入 7/暫停all.png 失敗，請確認檔案路徑 `7/暫停all.png` 是否正確', err);
+    }
+  );
+
+  // 載入 CSV 題庫
+  quizTable = loadTable('quiz.csv', 'csv', 'header',
+    () => {
+      console.log('成功載入 quiz.csv 題庫');
+    },
+    (err) => {
+      console.error('載入 quiz.csv 失敗，請確認檔案是否存在且格式正確', err);
     }
   );
 }
@@ -427,12 +441,47 @@ function draw() {
       isFallingDown = false;
       fallDownTick = 0;
       // 恢復後，暫時不進入互動狀態，避免立即顯示對話框
+      // 同時重置問答遊戲
+      resetQuiz();
       isInteracting = false;
       interactionCooldown = 30; // 設定30幀（約0.5秒）的冷卻時間
     } else if (!isFallingDown && interactionCooldown === 0) { // 只有在非倒下且冷卻結束時才互動
-    // 顯示並定位輸入框在角色1上方
-    inputBox.show();
-    inputBox.position(posX1 - inputBox.width / 2, drawY - displayH - 20);
+      // 進入互動狀態
+      isInteracting = true;
+      // 如果是第一次進入或剛回答完一題，就抽新題目
+      if (quizState === 'idle' && quizTable && quizTable.getRowCount() > 0) {
+        pickNewQuestion();
+      }
+
+      // 只有在提問階段才顯示輸入框
+      if (quizState === 'asking') {
+        // --- 繪製作答區塊 ---
+        push();
+        const promptText = "請作答：";
+        const textInputWidth = inputBox.width;
+        const padding = 10;
+        textSize(16);
+        const promptTextWidth = textWidth(promptText);
+        
+        const boxW = promptTextWidth + textInputWidth + padding * 2;
+        const boxH = inputBox.height + padding;
+        const boxX = posX1 - boxW / 2;
+        const boxY = drawY - displayH - boxH - 5;
+
+        // 繪製背景方塊
+        fill('#f0ebd8');
+        noStroke();
+        rect(boxX, boxY, boxW, boxH, 5);
+
+        // 繪製文字
+        fill(0);
+        textAlign(LEFT, CENTER);
+        text(promptText, boxX + padding, boxY + boxH / 2);
+        pop();
+
+        inputBox.show();
+        inputBox.position(boxX + padding + promptTextWidth, boxY + padding / 2);
+      }
 
     // 在角色2上方顯示帶有方框的文字
     push();
@@ -467,14 +516,14 @@ function draw() {
     translate(posX7_fixed, baseY);
     image(sprite5qImg, 0, 0, displayW5q, displayH5q, sx5q, sy5q, frameW5q, frameH5q);
     pop();
-    isInteracting = true;
     }
   } else { // 遠離時，或角色正在倒下時
     // 如果只是剛從互動狀態離開，重置對話UI
     if (isInteracting) {
       isInteracting = false;
       inputBox.hide();
-      orangeText = "需要我解答嗎?"; // 重設文字
+      // 離開時重置整個問答狀態
+      resetQuiz();
     }
   }
 
@@ -548,10 +597,39 @@ function drawFallingDownAnimation() {
 
 function handleInput() {
   const inputText = this.value().trim(); // 取得輸入框的內容並去除頭尾空白
-  if (inputText) { // 只有在輸入內容不為空時才更新
-    orangeText = `${inputText}，歡迎你`; // 組合新字串並更新
-    this.value(''); // 清空輸入框，方便下次輸入
+  if (!inputText || quizState !== 'asking' || !currentQuestion) return;
+
+  // 比較答案
+  if (inputText === currentQuestion.getString('answer')) {
+    // 答對了
+    orangeText = currentQuestion.getString('correct_feedback');
+  } else {
+    // 答錯了
+    orangeText = currentQuestion.getString('hint');
   }
+
+  quizState = 'feedback'; // 進入回饋狀態
+  this.value(''); // 清空輸入框
+  inputBox.hide(); // 隱藏輸入框
+
+  // 設定一個計時器，幾秒後自動抽下一題
+  setTimeout(pickNewQuestion, 2500); // 2.5秒後出新題目
+}
+
+function pickNewQuestion() {
+  if (!quizTable || quizTable.getRowCount() === 0) return;
+  // 從題庫中隨機選一題
+  const randomIndex = floor(random(quizTable.getRowCount()));
+  currentQuestion = quizTable.getRow(randomIndex);
+  // 更新對話文字為題目
+  orangeText = currentQuestion.getString('question');
+  quizState = 'asking'; // 切換到提問狀態
+}
+
+function resetQuiz() {
+  quizState = 'idle';
+  currentQuestion = null;
+  orangeText = "要來點挑戰嗎?"; // 重設起始文字
 }
 
 function windowResized() {
@@ -586,3 +664,4 @@ function keyReleased() {
     play4Tick = 0;
   }
 }
+

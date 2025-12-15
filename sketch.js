@@ -7,12 +7,16 @@ let sprite4Img;
 let sprite5Img;
 let sprite6dImg; // 新增：第 6 個角色的倒下動畫
 let sprite5qImg; // 新增：第 5 個角色的提問動畫
-let sprite7Img; // 新增：第 7 個動畫角色
+let sprite7Img;  // 新增：第 7 個動畫角色
+let spritePandaImg; // 新增：熊貓角色
+let spritePandaCloseImg; // 新增：熊貓接近動畫
 const TOTAL_FRAMES = 6; // 精靈表中有 6 張圖片
 const TOTAL_FRAMES_2 = 9; // 2all.png 有 9 張圖片
 const TOTAL_FRAMES_5Q = 6; // 5/提問all.png 有 6 張
 const TOTAL_FRAMES_6D = 4; // 6/倒下all.png 有 4 張
 const TOTAL_FRAMES_7 = 8; // 7/暫停all.png 有 8 張圖片
+const TOTAL_FRAMES_PANDA = 10; // 熊貓/吃東西/吃東西all.png 有 10 張圖片
+const TOTAL_FRAMES_PANDA_CLOSE = 7; // 熊貓/接近/接近all.png 有 7 張圖片
 let frameW = 0;
 let frameH = 0;
 let frameW2 = 0;
@@ -29,11 +33,16 @@ let frameW5q = 0;
 let frameH5q = 0;
 let frameW7 = 0;
 let frameH7 = 0;
+let frameWPanda = 0;
+let frameHPanda = 0;
+let frameWPandaClose = 0;
+let frameHPandaClose = 0;
 let frameDelay = 6; // 每幀持續的 draw 次數，數字越小動畫越快
 
 // 角色位置與狀態
 let posX1, posX2, posY; // 兩個獨立 x 位置：posX1 用於主要顯示，posX2 用於同時顯示另一張（1all/2all）
 let posX7_fixed; // 新增：第 7 個角色的固定 X 位置
+let pandaPosX_fixed; // 新增：熊貓角色的固定 X 位置
 let speed = 4;
 let movingLeft = false;
 let movingRight = false;
@@ -42,6 +51,7 @@ let facing2 = 1; // 2all 的朝向（獨立於主角）
 let lastFacing = 1; // 紀錄最近一次移動方向，用於靜止時的朝向
 let displayScale = 3; // 放大倍數，可調
 const interactionDistance = 100; // 角色互動的觸發距離
+const pandaInteractionDistance = 150; // 熊貓互動的觸發距離
 
 // --- 互動與問答遊戲相關 ---
 let quizTable; // 儲存從 CSV 載入的題庫
@@ -188,6 +198,29 @@ function preload() {
     }
   );
 
+  // 載入 熊貓/吃東西/吃東西all.png (新熊貓角色)
+  spritePandaImg = loadImage('熊貓/吃東西/吃東西all.png',
+    img => {
+      spritePandaImg = img;
+      console.log('載入 熊貓/吃東西/吃東西all.png 成功');
+    },
+    err => {
+      console.error('載入 熊貓/吃東西/吃東西all.png 失敗，請確認檔案路徑是否正確', err);
+    }
+  );
+
+  // 載入 熊貓/接近/接近all.png (新熊貓角色接近動畫)
+  spritePandaCloseImg = loadImage('熊貓/接近/接近all.png',
+    img => {
+      spritePandaCloseImg = img;
+      console.log('載入 熊貓/接近/接近all.png 成功');
+    },
+    err => {
+      console.error('載入 熊貓/接近/接近all.png 失敗，請確認檔案路徑是否正確', err);
+    }
+  );
+
+
   // 載入 CSV 題庫
   quizTable = loadTable('quiz.csv', 'csv', 'header',
     () => {
@@ -208,7 +241,8 @@ function setup() {
   posX2 = width / 2 + 60;
   baseY = height / 2;
   posY = baseY;
-  posX7_fixed = width / 2 - 200; // 將角色2（橘子）位置移到靠近中央的左側
+  posX7_fixed = width / 2 - 300; // 將角色2（橘子）位置移到靠近中央的左側
+  pandaPosX_fixed = width / 2 + 300; // 將熊貓角色位置固定在靠近中央的右側
 
   // 若圖片已載入，計算每幀寬高；若尚未載入，會在 draw 中延遲計算
   if (spriteImg && spriteImg.width) {
@@ -245,6 +279,16 @@ function setup() {
   if (sprite7Img && sprite7Img.width) {
     frameW7 = floor(sprite7Img.width / TOTAL_FRAMES_7); // 364 / 8 = 45.5 -> floor(45.5) = 45
     frameH7 = sprite7Img.height; // 32
+  }
+  // 新增：計算熊貓角色的影格尺寸
+  if (spritePandaImg && spritePandaImg.width) {
+    frameWPanda = spritePandaImg.width / TOTAL_FRAMES_PANDA; // 575 / 10 = 57.5
+    frameHPanda = spritePandaImg.height; // 54
+  }
+  // 新增：計算熊貓接近動畫的影格尺寸
+  if (spritePandaCloseImg && spritePandaCloseImg.width) {
+    frameWPandaClose = spritePandaCloseImg.width / TOTAL_FRAMES_PANDA_CLOSE; // 310 / 7 = 44.28
+    frameHPandaClose = spritePandaCloseImg.height; // 46
   }
 
   // 建立文字輸入框
@@ -557,7 +601,56 @@ function draw() {
     pop();
   }
 
-  // 最後繪製主要角色，確保它在最上層
+  // --- 繪製新的熊貓角色 ---
+  // 根據與角色1的距離，決定要顯示哪一個熊貓動畫
+  const pandaDist = abs(posX1 - pandaPosX_fixed);
+  let currentPandaImg, currentPandaFrames, currentPandaFrameW, currentPandaFrameH;
+
+  if (pandaDist < pandaInteractionDistance && spritePandaCloseImg) {
+    // 狀態1: 靠近時，使用「接近」動畫
+    currentPandaImg = spritePandaCloseImg;
+    currentPandaFrames = TOTAL_FRAMES_PANDA_CLOSE;
+    if (frameWPandaClose === 0) { // 延遲計算
+      frameWPandaClose = currentPandaImg.width / currentPandaFrames;
+      frameHPandaClose = currentPandaImg.height;
+    }
+    currentPandaFrameW = frameWPandaClose;
+    currentPandaFrameH = frameHPandaClose;
+  } else if (spritePandaImg) {
+    // 狀態2: 遠離時，使用「吃東西」動畫
+    currentPandaImg = spritePandaImg;
+    currentPandaFrames = TOTAL_FRAMES_PANDA;
+    if (frameWPanda === 0) { // 延遲計算
+      frameWPanda = currentPandaImg.width / currentPandaFrames;
+      frameHPanda = currentPandaImg.height;
+    }
+    currentPandaFrameW = frameWPanda;
+    currentPandaFrameH = frameHPanda;
+  }
+
+  // 如果有可顯示的熊貓圖片，就繪製它
+  if (currentPandaImg && currentPandaImg.width) {
+    const pandaIdx = floor(frameCount / frameDelay) % currentPandaFrames;
+    const pandaSx = pandaIdx * currentPandaFrameW;
+    const displayWPanda = currentPandaFrameW * displayScale;
+    const displayHPanda = currentPandaFrameH * displayScale;
+
+    const pandaPosX = pandaPosX_fixed;
+    const pandaPosY = baseY;
+
+    let pandaFacing = 1; // 預設朝向
+    if (posX1 > pandaPosX) {
+      pandaFacing = -1; // 角色在右邊，熊貓朝右
+    }
+
+    push();
+    translate(pandaPosX, pandaPosY);
+    scale(pandaFacing, 1);
+    image(currentPandaImg, 0, 0, displayWPanda, displayHPanda, pandaSx, 0, currentPandaFrameW, currentPandaFrameH);
+    pop();
+  }
+
+  // 最後繪製主要角色，確保它在所有物件的最上層
   push();
   // 主要角色繪製（使用 posX1）
   translate(posX1, drawY);
@@ -566,6 +659,7 @@ function draw() {
   // 注意：當 scale(-1,1) 時，影像仍以正寬度繪製，所以不須調整 sx
   image(currentImg, 0, 0, displayW, displayH, sx, sy, cw, ch);
   pop();
+
 } // end draw()
 
 function drawFallingDownAnimation() {
@@ -637,7 +731,8 @@ function windowResized() {
   // 更新位置（保持於中間附近）
   posY = height / 2;
   // 視窗變動時也更新固定位置，與 setup() 中保持一致
-  posX7_fixed = width / 2 - 200;
+  posX7_fixed = width / 2 - 300;
+  pandaPosX_fixed = width / 2 + 300;
   posX1 = width / 2 - 60;
   posX2 = width / 2 + 60;
 }
